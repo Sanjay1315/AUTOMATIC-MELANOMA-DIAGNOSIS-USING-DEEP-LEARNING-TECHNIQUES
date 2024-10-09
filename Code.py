@@ -1,13 +1,11 @@
 
-
-
 import cv2
 import csv
 import collections
 import numpy as np
 from tracker import *
-fr="dataset/test/benign/melanoma_9610.jpg"
-import cv2  
+fr="dataset/test/benign/melanoma_9608.jpg"
+import cv2
 import numpy as np
 from matplotlib import pyplot as plt
 
@@ -233,3 +231,251 @@ ssim_index, _ = ssim(ground_truth_gray, segmented_gray, full=True)
 print("Root Mean Squared Error (RMSE):", rmse)
 print("Peak Signal-to-Noise Ratio (PSNR):", psnr)
 print("Structural Similarity Index (SSIM):", ssim_index)
+
+
+import tensorflow as tf
+from tensorflow.keras.layers import Input, Conv2D, MaxPooling2D, Dropout, concatenate, UpSampling2D
+import numpy as np
+import matplotlib.pyplot as plt
+from torchvision import transforms, datasets
+from torch.utils.data import DataLoader
+import torch.nn as nn
+import random
+random.seed(0)
+np.random.seed(0)
+tf.random.set_seed(0)
+# Define a double convolution block
+class BasicBlock(nn.Module):
+    def __init__(self, in_channels, out_channels, stride=1):
+        super(BasicBlock, self).__init__()
+        self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=stride, padding=1, bias=False)
+        self.bn1 = nn.BatchNorm2d(out_channels)
+        self.relu = nn.ReLU(inplace=True)
+        self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, stride=1, padding=1, bias=False)
+        self.bn2 = nn.BatchNorm2d(out_channels)
+        self.stride = stride
+
+    def forward(self, x):
+        residual = x
+
+        out = self.conv1(x)
+        out = self.bn1(out)
+        out = self.relu(out)
+
+        out = self.conv2(out)
+        out = self.bn2(out)
+
+        if self.stride != 1 or x.size(1) != out.size(1):
+            residual = nn.Conv2d(x.size(1), out.size(1), kernel_size=1, stride=self.stride, bias=False)(x)
+
+        out += residual
+        out = self.relu(out)
+
+        return out
+def double_conv(in_channels, out_channels):
+    return nn.Sequential(
+        nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1),
+        nn.BatchNorm2d(out_channels),
+        nn.ReLU(inplace=True),
+        nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
+        nn.BatchNorm2d(out_channels),
+        nn.ReLU(inplace=True)
+    )
+
+# Define the loss function
+def dice_loss(pred, target, smooth=1.):
+    intersection = (pred * target).sum()
+    dice = (2. * intersection + smooth)/(pred.sum() + target.sum() + smooth)
+    return 1. - dice
+
+# Define the performance metrics
+def iou_score(pred, target, smooth=1.):
+    intersection = (pred & target).sum().float()
+    union = (pred | target).sum().float()
+    iou = (intersection + smooth) / (union + smooth)
+    return iou
+
+def dice_coef(pred, target, smooth=1.):
+    intersection = (pred * target).sum()
+    dice = (2. * intersection + smooth)/(pred.sum() + target.sum() + smooth)
+    return dice
+from tensorflow import keras
+from tensorflow.keras import layers
+IMG_HEIGHT = 256
+IMG_WIDTH = 256
+import torch
+import torch.nn as nn
+import torchvision
+from einops import rearrange
+
+# Vision Transformer Model
+class VisionTransformer(nn.Module):
+    def __init__(self, image_size, patch_size, num_classes, dim, depth, heads, mlp_dim, channels=3):
+        super(VisionTransformer, self).__init__()
+        assert image_size % patch_size == 0, "Image dimensions must be divisible by the patch size."
+        num_patches = (image_size // patch_size) ** 2
+        patch_dim = channels * patch_size ** 2
+
+        # Patch embedding layer
+        self.patch_embedding = nn.Conv2d(channels, dim, kernel_size=patch_size, stride=patch_size)
+        self.cls_token = nn.Parameter(torch.randn(1, 1, dim))
+
+        # Positional embedding
+        self.positional_embedding = nn.Parameter(torch.randn(num_patches + 1, dim))
+
+        # Transformer Encoder
+        self.transformer_encoder = nn.TransformerEncoder(nn.TransformerEncoderLayer(
+            d_model=dim, nhead=heads, dim_feedforward=mlp_dim), num_layers=depth)
+
+        # Classifier head
+        self.fc = nn.Linear(dim, num_classes)
+
+    def forward(self, x):
+        # Patch embedding
+        x = self.patch_embedding(x)
+        x = rearrange(x, 'b c h w -> b (h w) c')  # Flatten the spatial dimensions into patches
+        x = torch.cat((self.cls_token.expand(x.size(0), -1, -1), x), dim=1)  # Add classification token
+
+        # Add positional embeddings
+        x += self.positional_embedding
+        x = x.permute(1, 0, 2)  # Transpose for transformer input
+
+        # Transformer encoder
+        x = self.transformer_encoder(x)
+
+        # Classification head
+        x = x.mean(dim=0)  # Take mean over tokens
+        x = self.fc(x)
+
+        return x
+
+# Example usage
+image_size = 224
+patch_size = 16
+num_classes = 1000
+dim = 512
+depth = 6
+heads = 8
+mlp_dim = 2048
+
+# Instantiate Vision Transformer model
+vit_model = VisionTransformer(image_size, patch_size, num_classes, dim, depth, heads, mlp_dim)
+
+# Example input
+input_tensor = torch.randn(1, 3, image_size, image_size)  # Batch size 1, 3 channels (RGB), image size 224x224
+
+# Forward pass
+output = vit_model(input_tensor)
+print("Output shape:", output.shape)
+
+import numpy as np
+import matplotlib.pyplot as plt
+import cv2
+import os
+import tensorflow as tf
+from PIL import Image
+from sklearn.model_selection import train_test_split
+from tensorflow.keras.utils import normalize, to_categorical
+from tensorflow.keras.models import Sequential, load_model
+from tensorflow.keras.layers import Conv2D, MaxPooling2D, Activation, Dropout, Flatten, Dense 
+# ## Load Data
+image_directory='dataset/test/'
+no_tumor_images=os.listdir(image_directory+ 'benign/')
+yes_tumor_images=os.listdir(image_directory+ 'malignant/')
+print('Train: ', len(no_tumor_images))
+print('Test: ',len(yes_tumor_images))
+dataset=[]
+label=[]
+INPUT_SIZE=64
+# ## Create labels 
+for i , image_name in enumerate(no_tumor_images):
+    if(image_name.split('.')[1]=='jpg'):
+        image=cv2.imread(image_directory+'benign/'+image_name)
+        image=Image.fromarray(image,'RGB')
+        image=image.resize((INPUT_SIZE,INPUT_SIZE))
+        dataset.append(np.array(image))
+        label.append(0)
+
+for i , image_name in enumerate(yes_tumor_images):
+    if(image_name.split('.')[1]=='jpg'):
+        image=cv2.imread(image_directory+'malignant/'+image_name)
+        image=Image.fromarray(image, 'RGB')
+        image=image.resize((INPUT_SIZE,INPUT_SIZE))
+        dataset.append(np.array(image))
+        label.append(1)
+dataset=np.array(dataset)
+label=np.array(label)
+print('Dataset: ',len(dataset))
+print('Label: ',len(label))
+# ## Train-Test Split
+X_train, X_test, y_train, y_test = train_test_split(dataset, label, test_size=0.20, random_state=2523)
+# ## Normalize the Data
+X_train = normalize(X_train, axis=1)
+X_test = normalize(X_test, axis=1)
+vit_model = VisionTransformer(image_size, patch_size, num_classes, dim, depth, heads, mlp_dim)
+model=Sequential()
+model.add(Conv2D(32, (3,3),activation='relu', input_shape=(INPUT_SIZE, INPUT_SIZE, 3)))
+model.add(MaxPooling2D(pool_size=(2,2)))
+model.add(Flatten())
+model.add(Dense(64,activation='relu'))
+model.add(Dropout(0.5))
+model.add(Dense(1,activation='sigmoid'))
+model.add(Dense(64,activation='relu'))
+model.add(Dropout(0.5))
+model.add(Dense(1,activation='sigmoid'))
+
+model.compile(optimizer=tf.keras.optimizers.Adam(lr=1e-4), loss=dice_loss, metrics=[dice_coef])
+
+
+model.summary()
+model.compile(loss='binary_crossentropy',optimizer='adam', metrics=['accuracy'])
+from tensorflow.keras.utils import plot_model
+plot_model(model, to_file='model_architecture.png', show_shapes=True, show_layer_names=True)
+history=model.fit(X_train, y_train, 
+batch_size=32, 
+verbose=1, epochs=20, 
+validation_data=(X_test, y_test),
+shuffle=False)
+plt.figure(0)
+plt.plot(history.history['accuracy'], label='training accuracy')
+plt.plot(history.history['val_accuracy'], label='val accuracy')
+plt.title('Accuracy')
+plt.xlabel('epochs')
+plt.ylabel('accuracy')
+plt.legend()
+plt.show()
+plt.figure(1)
+plt.plot(history.history['loss'], label='training loss')
+plt.plot(history.history['val_loss'], label='val loss')
+plt.title('Loss')
+plt.xlabel('epochs')
+plt.ylabel('loss')
+plt.legend()
+plt.show()
+
+# ## Save the Model
+
+model.save('model.h5')
+
+
+# ## Load Model 
+
+model = load_model('model.h5')
+model_json = model.to_json()
+with open('model_architecture.json', 'w') as f:
+    f.write(model_json)
+
+# ## Make Prediction on New Data
+
+#show_result('1.png')
+model.load_weights('model.h5')
+
+y_pred = model.predict(X_test)
+from sklearn.metrics import accuracy_score,confusion_matrix,classification_report
+y_pred = model.predict(X_test)
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+
+acc = accuracy_score(y_test, y_pred.round())
+scores = model.evaluate(X_test, y_test, verbose=0)
+print('Test loss:', scores[0])
+print('Test accuracy:', scores[1])
